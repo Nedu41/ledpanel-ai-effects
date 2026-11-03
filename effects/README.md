@@ -1,0 +1,1 @@
+Generated LED effect PNG files are stored here. Filenames use timestamps and random IDs; prompts are not published. This repository is public, so all saved images are visible to anyone.
