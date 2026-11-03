@@ -11,8 +11,6 @@ jobs:
     steps:
       - name: Checkout effects library
         uses: actions/checkout@v4
-      - name: Download existing LED effect engine
-        run: git clone --depth 1 https://github.com/Nedu41/LedPanel-Pico.git panel-src
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

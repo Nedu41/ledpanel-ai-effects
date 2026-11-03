@@ -1,16 +1,42 @@
 import json
+import math
 import os
 import re
 import sys
+import time
+import traceback
 from pathlib import Path
 
 from PIL import Image
 import numpy as np
 
 root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "panel-src" / "araclar"))
-sys.argv = ["ai_efekt.py"]
-import ai_efekt as engine
+
+
+def compile_effect(code, W, H):
+    """Validate and compile the existing LED frame(t, W, H) Python format."""
+    code = re.sub(r'^\s*(import (numpy|math)( as \w+)?|from (numpy|math) import .*)\s*$', '', code, flags=re.M)
+    bad = re.search(r'^\s*(import|from)\s.*$', code, re.M) or re.search(r'__\w*', code) or re.search(r'\b(open|exec|eval|compile|globals|locals|getattr|setattr|input)\s*\(', code)
+    if bad:
+        return None, "yasak ifade: %r" % bad.group(0).strip()[:60]
+    allowed = ('range', 'len', 'min', 'max', 'abs', 'int', 'float', 'sum', 'round', 'enumerate', 'zip', 'list', 'dict', 'tuple', 'bool', 'pow', 'divmod', 'sorted', 'reversed', 'map', 'any', 'all', 'isinstance', 'set')
+    builtins_obj = __builtins__
+    safe_builtins = {k: builtins_obj[k] if isinstance(builtins_obj, dict) else getattr(builtins_obj, k) for k in allowed}
+    ns = {'np': np, 'math': math, '__builtins__': safe_builtins}
+    try:
+        exec(code, ns)
+        fn = ns['frame']
+        started = time.time()
+        for tt in (0.0, 1.7):
+            arr = np.asarray(fn(tt, W, H))
+            if arr.shape != (H, W, 3):
+                return None, 'frame() sekli %s, beklenen %s' % (arr.shape, (H, W, 3))
+        elapsed = (time.time() - started) / 2
+        if elapsed > 0.12:
+            return None, 'frame() cok yavas (%.0f ms)' % (elapsed * 1000)
+        return fn, None
+    except Exception:
+        return None, traceback.format_exc(limit=3)
 
 event = json.loads(Path(os.environ["EVENT_PATH"]).read_text(encoding="utf-8"))
 payload = event.get("client_payload", {})
@@ -27,7 +53,7 @@ try:
     w, h = int(payload.get("w", 0)), int(payload.get("h", 0))
     if (w, h) not in ((104, 52), (52, 104)):
         raise ValueError("unsupported panel dimensions")
-    fn, error = engine.compile_effect(code, w, h)
+    fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError("AI code check: " + str(error)[:300])
     frames = []
