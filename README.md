@@ -1,5 +1,5 @@
 # LED Panel AI Effects
 
-Public image library for the Nedu41 LED panel. Generated PNG files are saved under effects/ by the Cloudflare Worker and can be loaded again from the panel interface.
+Public animation library for the Nedu41 LED panel. The Cloudflare Worker asks Gemini for code in the existing Python `frame(t, W, H)` format. GitHub Actions safely renders that effect into a 90-frame animated GIF and saves it under `effects/`. The panel browser loads the GIF from this repository, converts its frames to the panel palette, and stores the animation in Pico LittleFS.
 
-Only the generated image is published. Prompts and access tokens are not stored in this repository. Every image here is public and can be viewed or downloaded by anyone.
+Only the rendered animation is published. Prompts and generated Python source are not committed to this repository. Animation files are public and can be viewed or downloaded by anyone.
