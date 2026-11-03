@@ -7,7 +7,7 @@ permissions:
 jobs:
   render-and-save:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     permissions:
       contents: write
     steps:
@@ -23,6 +23,7 @@ jobs:
       - name: Render Python effect as animated GIF
         env:
           EVENT_PATH: ${{ github.event_path }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python tools/render_cloud_effect.py
       - name: Save result in the public effects library
         env:

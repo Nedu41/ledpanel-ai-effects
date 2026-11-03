@@ -5,6 +5,8 @@ import re
 import sys
 import time
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from PIL import Image
@@ -53,13 +55,8 @@ out.mkdir(exist_ok=True)
 if not re.fullmatch(r"[0-9]+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:-[a-z0-9]+)*\.gif", effect_id):
     raise SystemExit("invalid effect id")
 error_path = out / (effect_id[:-4] + ".error.json")
-try:
-    code = payload.get("code", "")
-    if not isinstance(code, str) or len(code) > 48000:
-        raise ValueError("invalid generated code")
-    w, h = int(payload.get("w", 0)), int(payload.get("h", 0))
-    if (w, h) not in ((104, 52), (52, 104)):
-        raise ValueError("unsupported panel dimensions")
+def render_frames(code, w, h):
+    """Compile and render one seamless loop; raises ValueError with a short, repairable error."""
     fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError(error)
@@ -84,12 +81,64 @@ try:
         # 256 colours, no dithering: dither noise flickers between frames on the LED panel.
         img = Image.fromarray(np.round(arr).astype(np.uint8), "RGB")
         frames.append(img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
+    return frames
+
+
+MODELS = ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash-lite", "gemini-flash-lite-latest")
+
+
+def repair(system, prompt, code, error):
+    """Ask Gemini to fix code that failed here (same loop as the legacy PC engine). Returns new code or ''."""
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key or not system or not prompt:
+        return ""
+    text = prompt + "\n\nOnceki kod:\n" + code + "\n\nBu kod calisirken hata verdi, hatayi duzeltip kodun tamamini yeniden yaz:\n" + error
+    body = json.dumps({"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": text}]}]}).encode()
+    for model in MODELS:
+        req = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model, data=body,
+                                     headers={"Content-Type": "application/json", "x-goog-api-key": key})
+        try:
+            with urllib.request.urlopen(req, timeout=90) as r:
+                data = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            print("repair model %s unavailable (HTTP %d)" % (model, e.code))
+            continue
+        except Exception as e:
+            print("repair model %s failed (%s)" % (model, type(e).__name__))
+            continue
+        out_text = "\n".join(p.get("text", "") for p in data.get("candidates", [{}])[0].get("content", {}).get("parts", []))
+        m = re.search(r"```(?:python)?\s*(.*?)```", out_text, re.S)
+        fixed = (m.group(1) if m else out_text).strip()
+        if "def frame" in fixed:
+            return fixed
+    return ""
+
+
+try:
+    code = payload.get("code", "")
+    if not isinstance(code, str) or len(code) > 48000:
+        raise ValueError("invalid generated code")
+    w, h = int(payload.get("w", 0)), int(payload.get("h", 0))
+    if (w, h) not in ((104, 52), (52, 104)):
+        raise ValueError("unsupported panel dimensions")
+    system, prompt = str(payload.get("system", ""))[:6000], str(payload.get("prompt", ""))[:400]
+    frames, attempt = None, 0
+    for attempt in range(1, 4):
+        try:
+            frames = render_frames(code, w, h)
+            break
+        except ValueError as err:
+            print("attempt %d failed: %s" % (attempt, str(err).splitlines()[-1][:200]))
+            fixed = repair(system, prompt, code, str(err)) if attempt < 3 else ""
+            if not fixed:
+                raise
+            code = fixed
     target = out / effect_id
     frames[0].save(target, save_all=True, append_images=frames[1:], duration=67, loop=0, optimize=False, disposal=2)
     if target.stat().st_size > 12_000_000:
         target.unlink(missing_ok=True)
         raise ValueError("rendered animation exceeds the library size limit")
-    print(f"Rendered {count} frames at {w}x{h}: {target.stat().st_size} bytes")
+    print(f"Rendered {len(frames)} frames at {w}x{h} (attempt {attempt}): {target.stat().st_size} bytes")
 except Exception as exc:
     (out / (effect_id[:-4] + ".gif")).unlink(missing_ok=True)
     error_path.write_text(json.dumps({"error": str(exc)[-700:]}), encoding="utf-8")
