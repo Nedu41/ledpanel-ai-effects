@@ -43,7 +43,7 @@ payload = event.get("client_payload", {})
 effect_id = str(payload.get("id", ""))
 out = Path("out")
 out.mkdir(exist_ok=True)
-if not re.fullmatch(r"[0-9]+-[0-9a-f-]+\.gif", effect_id):
+if not re.fullmatch(r"[0-9]+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:-[a-z0-9]+)*\.gif", effect_id):
     raise SystemExit("invalid effect id")
 error_path = out / (effect_id[:-4] + ".error.json")
 try:
