@@ -94,7 +94,9 @@ def repair(system, prompt, code, error):
         return ""
     text = prompt + "\n\nOnceki kod:\n" + code + "\n\nBu kod calisirken hata verdi, hatayi duzeltip kodun tamamini yeniden yaz:\n" + error
     body = json.dumps({"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"role": "user", "parts": [{"text": text}]}]}).encode()
-    for model in MODELS:
+    first = str(payload.get("model", ""))
+    order = ([first] if re.fullmatch(r"[a-z0-9.-]+", first) else []) + [m for m in MODELS if m != first]
+    for model in order:           # the model that just worked for the worker is the one with quota left
         req = urllib.request.Request("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent" % model, data=body,
                                      headers={"Content-Type": "application/json", "x-goog-api-key": key})
         try:
@@ -110,6 +112,7 @@ def repair(system, prompt, code, error):
         m = re.search(r"```(?:python)?\s*(.*?)```", out_text, re.S)
         fixed = (m.group(1) if m else out_text).strip()
         if "def frame" in fixed:
+            print("repaired with", model)
             return fixed
     return ""
 
