@@ -36,7 +36,14 @@ def compile_effect(code, W, H):
             return None, 'frame() cok yavas (%.0f ms)' % (elapsed * 1000)
         return fn, None
     except Exception:
-        return None, traceback.format_exc(limit=3)
+        return None, short_error()
+
+
+def short_error():
+    """Last traceback frames from the generated code plus the exception text (the useful part for a repair request)."""
+    lines = [l for l in traceback.format_exc().splitlines() if l.strip()]
+    tail = [l for l in lines if '<string>' in l][-2:] + lines[-1:]
+    return '\n'.join(tail)[-700:]
 
 event = json.loads(Path(os.environ["EVENT_PATH"]).read_text(encoding="utf-8"))
 payload = event.get("client_payload", {})
@@ -55,17 +62,28 @@ try:
         raise ValueError("unsupported panel dimensions")
     fn, error = compile_effect(code, w, h)
     if not fn:
-        raise ValueError("AI code check: " + str(error)[:300])
-    frames = []
-    # Match the original Pico effect path: 48 frames at 15 fps gives a
-    # smooth ~3.2 second loop while staying within Pico flash and upload time.
-    count, fps = 48, 15
-    for i in range(count):
-        arr = np.asarray(fn(i / fps, w, h))
+        raise ValueError(error)
+    # 72 frames at 15 fps (4.8 s). XF extra frames are rendered and cross-faded
+    # into the first frames, so the loop point has no visible jump for any effect.
+    count, fps, XF = 72, 15, 12
+    raw = []
+    for i in range(count + XF):
+        try:
+            arr = np.asarray(fn(i / fps, w, h))
+        except Exception:
+            raise ValueError(short_error())
         if arr.shape != (h, w, 3):
-            raise ValueError("frame() returned invalid shape")
-        arr = np.clip(arr, 0, 255).astype(np.uint8)
-        frames.append(Image.fromarray(arr, "RGB").quantize(colors=64, method=Image.Quantize.MEDIANCUT))
+            raise ValueError("frame() returned shape %s at t=%.2f, expected %s" % (arr.shape, i / fps, (h, w, 3)))
+        raw.append(np.clip(np.asarray(arr, dtype=np.float32), 0, 255))
+    frames = []
+    for i in range(count):
+        arr = raw[i]
+        if i < XF:
+            a = (i + 1) / (XF + 1)
+            arr = arr * a + raw[i + count] * (1 - a)
+        # 256 colours, no dithering: dither noise flickers between frames on the LED panel.
+        img = Image.fromarray(np.round(arr).astype(np.uint8), "RGB")
+        frames.append(img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
     target = out / effect_id
     frames[0].save(target, save_all=True, append_images=frames[1:], duration=67, loop=0, optimize=False, disposal=2)
     if target.stat().st_size > 12_000_000:
@@ -74,5 +92,5 @@ try:
     print(f"Rendered {count} frames at {w}x{h}: {target.stat().st_size} bytes")
 except Exception as exc:
     (out / (effect_id[:-4] + ".gif")).unlink(missing_ok=True)
-    error_path.write_text(json.dumps({"error": str(exc)[:300]}), encoding="utf-8")
-    print("Animation generation failed:", str(exc)[:300])
+    error_path.write_text(json.dumps({"error": str(exc)[-700:]}), encoding="utf-8")
+    print("Animation generation failed:", str(exc)[-700:])
