@@ -1,1 +1,0 @@
-{"error": "AI code check: Traceback (most recent call last):\n  File \"/home/runner/work/ledpanel-ai-effects/ledpanel-ai-effects/tools/render_cloud_effect.py\", line 31, in compile_effect\n    arr = np.asarray(fn(tt, W, H))\n                     ^^^^^^^^^^^^\n  File \"<string>\", line 9, in frame\nIndexError: boolean i"}
