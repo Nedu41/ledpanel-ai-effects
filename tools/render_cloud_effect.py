@@ -55,14 +55,17 @@ out.mkdir(exist_ok=True)
 if not re.fullmatch(r"[0-9]+-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?:-[a-z0-9]+)*\.gif", effect_id):
     raise SystemExit("invalid effect id")
 error_path = out / (effect_id[:-4] + ".error.json")
+FRAME_MS = 70
+
+
 def render_frames(code, w, h):
     """Compile and render one seamless loop; raises ValueError with a short, repairable error."""
     fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError(error)
-    # 72 frames at 15 fps (4.8 s). XF extra frames are rendered and cross-faded
-    # into the first frames, so the loop point has no visible jump for any effect.
-    count, fps, XF = 72, 15, 12
+    # 72 frames of 70 ms (~5 s; GIF stores 1/100 s, so 70 ms is exact while 67 ms would play as 60).
+    # XF extra frames are rendered and cross-faded into the first frames: no visible jump at the loop point.
+    count, fps, XF = 72, 1000 / 70, 12
     raw = []
     for i in range(count + XF):
         try:
@@ -137,7 +140,7 @@ try:
                 raise
             code = fixed
     target = out / effect_id
-    frames[0].save(target, save_all=True, append_images=frames[1:], duration=67, loop=0, optimize=False, disposal=2)
+    frames[0].save(target, save_all=True, append_images=frames[1:], duration=FRAME_MS, loop=0, optimize=False, disposal=2)
     if target.stat().st_size > 12_000_000:
         target.unlink(missing_ok=True)
         raise ValueError("rendered animation exceeds the library size limit")
