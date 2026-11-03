@@ -3,56 +3,41 @@ on:
   repository_dispatch:
     types: [generate_ai_effect]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  render:
+  render-and-save:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - name: Checkout effects library
         uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Install renderer dependencies
         run: python -m pip install numpy pillow
-      - name: Render existing Python effect as animated GIF
+      - name: Render Python effect as animated GIF
         env:
           EVENT_PATH: ${{ github.event_path }}
         run: python tools/render_cloud_effect.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: led-effect-${{ github.event.client_payload.id }}
-          path: out/
-          if-no-files-found: error
-          retention-days: 1
-  save:
-    needs: render
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-      - uses: actions/download-artifact@v4
-        with:
-          name: led-effect-${{ github.event.client_payload.id }}
-          path: rendered
-      - name: Save animation in the public effects library
+      - name: Save result in the public effects library
         env:
           EFFECT_ID: ${{ github.event.client_payload.id }}
         run: |
+          set -euo pipefail
           mkdir -p effects
-          if [ -f "rendered/$EFFECT_ID" ]; then
+          if [ -f "out/$EFFECT_ID" ]; then
             target="effects/$EFFECT_ID"
-            cp "rendered/$EFFECT_ID" "$target"
+            cp "out/$EFFECT_ID" "$target"
           else
             error_id="${EFFECT_ID%.gif}.error.json"
-            test -f "rendered/$error_id"
+            test -f "out/$error_id"
             target="effects/$error_id"
-            cp "rendered/$error_id" "$target"
+            cp "out/$error_id" "$target"
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

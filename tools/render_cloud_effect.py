@@ -57,7 +57,9 @@ try:
     if not fn:
         raise ValueError("AI code check: " + str(error)[:300])
     frames = []
-    count, fps = 90, 15
+    # Match the original Pico effect path: 48 frames at 15 fps gives a
+    # smooth ~3.2 second loop while staying within Pico flash and upload time.
+    count, fps = 48, 15
     for i in range(count):
         arr = np.asarray(fn(i / fps, w, h))
         if arr.shape != (h, w, 3):
