@@ -63,10 +63,10 @@ def render_frames(code, w, h):
     fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError(error)
-    # Loop point search (70 ms frames; GIF stores 1/100 s, so 70 ms is exact): render ~16 s, skip a short warm-up and cut
-    # where two frames match best (10.5-12.6 s loop; the panel holds 180 frames). A long cross-fade doubled moving objects at the seam, so only a very short one is used
+    # Loop point search (70 ms frames; GIF stores 1/100 s, so 70 ms is exact): render ~33 s, skip a short warm-up and cut
+    # where two frames match best. A long cross-fade doubled moving objects at the seam, so only a very short one is used
     # when the best cut still differs clearly more than normal frame-to-frame movement.
-    fps, S, SPAN, LMIN, LMAX, XFM = 1000 / 70, 12, 30, 150, 180, 4
+    fps, S, SPAN, LMIN, LMAX, XFM, BUDGET = 1000 / 70, 12, 30, 150, 430, 4, 880_000
     raw = []
     for i in range(S + SPAN + LMAX + XFM + 1):
         try:
@@ -76,16 +76,38 @@ def render_frames(code, w, h):
         if arr.shape != (h, w, 3):
             raise ValueError("frame() returned shape %s at t=%.2f, expected %s" % (arr.shape, i / fps, (h, w, 3)))
         raw.append(np.clip(np.asarray(arr, dtype=np.float32), 0, 255))
+    # One palette for the whole animation: with a palette per frame still pixels changed value and the panel's
+    # changed-pixel storage lost its gain. The panel plays one 256-colour palette anyway, so nothing is lost.
+    def rgb8(x):
+        return Image.fromarray(np.round(x).astype(np.uint8), "RGB")
+    sheet = np.concatenate(raw[S:S + LMAX + 1], axis=0)
+    palette = rgb8(sheet).quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    def indexed(x):
+        return rgb8(x).quantize(palette=palette, dither=Image.Dither.NONE)
+    def stored(cur, prev):
+        """Exact size on the panel: 2 B length, one token per run of up to 127 pixels, changed pixels literally."""
+        ch = (cur != prev).ravel()
+        cuts = np.flatnonzero(np.diff(ch.astype(np.int8))) + 1
+        runs = np.diff(np.concatenate(([0], cuts, [ch.size])))
+        return 2 + int(ch.sum()) + int(np.sum((runs + 126) // 127))
+    # Length follows the scene: the panel stores only changed pixels in about 1 MB, so calm scenes loop up to 30 s.
+    ix = [np.array(indexed(x)) for x in raw]
+    used, length = stored(ix[S], np.zeros_like(ix[S])), LMIN
+    for n in range(1, LMAX):
+        used += stored(ix[S + n], ix[S + n - 1])
+        if used > BUDGET:
+            break
+        length = max(LMIN, n + 1)
     small = [x[::2, ::2] for x in raw]
     move = float(np.median([np.abs(small[i + 1] - small[i]).mean() for i in range(S, len(small) - 1)]))
-    best, a, b = None, S, S + LMIN
+    best, a, b = None, S, S + length
     for i in range(S, S + SPAN + 1):
-        for j in range(i + LMIN, i + LMAX + 1):
+        for j in range(i + max(LMIN, length - 30), i + length + 1):
             d = float(np.abs(small[i] - small[j]).mean())
             if best is None or d < best:
                 best, a, b = d, i, j
     XF = 0 if best <= 1.5 * max(move, 0.01) else XFM
-    print("loop: frames %d..%d (%d), seam %.2f, movement %.2f, cross-fade %d" % (a, b, b - a, best, move, XF))
+    print("loop: frames %d..%d (%d, target %d), up to %d KB, seam %.2f, movement %.2f, cross-fade %d" % (a, b, b - a, length, used // 1024, best, move, XF))
     frames = []
     for i in range(b - a):
         arr = raw[a + i]
@@ -93,8 +115,7 @@ def render_frames(code, w, h):
             mix = (i + 1) / (XF + 1)
             arr = arr * mix + raw[b + i] * (1 - mix)
         # 256 colours, no dithering: dither noise flickers between frames on the LED panel.
-        img = Image.fromarray(np.round(arr).astype(np.uint8), "RGB")
-        frames.append(img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
+        frames.append(indexed(arr))
     return frames
 
 
