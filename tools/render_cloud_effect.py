@@ -63,11 +63,12 @@ def render_frames(code, w, h):
     fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError(error)
-    # 72 frames of 70 ms (~5 s; GIF stores 1/100 s, so 70 ms is exact while 67 ms would play as 60).
-    # XF extra frames are rendered and cross-faded into the first frames: no visible jump at the loop point.
-    count, fps, XF = 72, 1000 / 70, 12
+    # Loop point search (70 ms frames; GIF stores 1/100 s, so 70 ms is exact): render ~10 s, skip a short warm-up and cut
+    # where two frames match best. A long cross-fade doubled moving objects at the seam, so only a very short one is used
+    # when the best cut still differs clearly more than normal frame-to-frame movement.
+    fps, S, SPAN, LMIN, LMAX, XFM = 1000 / 70, 12, 30, 60, 96, 4
     raw = []
-    for i in range(count + XF):
+    for i in range(S + SPAN + LMAX + XFM + 1):
         try:
             arr = np.asarray(fn(i / fps, w, h))
         except Exception:
@@ -75,12 +76,22 @@ def render_frames(code, w, h):
         if arr.shape != (h, w, 3):
             raise ValueError("frame() returned shape %s at t=%.2f, expected %s" % (arr.shape, i / fps, (h, w, 3)))
         raw.append(np.clip(np.asarray(arr, dtype=np.float32), 0, 255))
+    small = [x[::2, ::2] for x in raw]
+    move = float(np.median([np.abs(small[i + 1] - small[i]).mean() for i in range(S, len(small) - 1)]))
+    best, a, b = None, S, S + LMIN
+    for i in range(S, S + SPAN + 1):
+        for j in range(i + LMIN, i + LMAX + 1):
+            d = float(np.abs(small[i] - small[j]).mean())
+            if best is None or d < best:
+                best, a, b = d, i, j
+    XF = 0 if best <= 1.5 * max(move, 0.01) else XFM
+    print("loop: frames %d..%d (%d), seam %.2f, movement %.2f, cross-fade %d" % (a, b, b - a, best, move, XF))
     frames = []
-    for i in range(count):
-        arr = raw[i]
+    for i in range(b - a):
+        arr = raw[a + i]
         if i < XF:
-            a = (i + 1) / (XF + 1)
-            arr = arr * a + raw[i + count] * (1 - a)
+            mix = (i + 1) / (XF + 1)
+            arr = arr * mix + raw[b + i] * (1 - mix)
         # 256 colours, no dithering: dither noise flickers between frames on the LED panel.
         img = Image.fromarray(np.round(arr).astype(np.uint8), "RGB")
         frames.append(img.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE))
