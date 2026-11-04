@@ -63,10 +63,10 @@ def render_frames(code, w, h):
     fn, error = compile_effect(code, w, h)
     if not fn:
         raise ValueError(error)
-    # Loop point search (70 ms frames; GIF stores 1/100 s, so 70 ms is exact): render ~10 s, skip a short warm-up and cut
-    # where two frames match best. A long cross-fade doubled moving objects at the seam, so only a very short one is used
+    # Loop point search (70 ms frames; GIF stores 1/100 s, so 70 ms is exact): render ~16 s, skip a short warm-up and cut
+    # where two frames match best (10.5-12.6 s loop; the panel holds 180 frames). A long cross-fade doubled moving objects at the seam, so only a very short one is used
     # when the best cut still differs clearly more than normal frame-to-frame movement.
-    fps, S, SPAN, LMIN, LMAX, XFM = 1000 / 70, 12, 30, 60, 96, 4
+    fps, S, SPAN, LMIN, LMAX, XFM = 1000 / 70, 12, 30, 150, 180, 4
     raw = []
     for i in range(S + SPAN + LMAX + XFM + 1):
         try:
